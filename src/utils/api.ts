@@ -1,12 +1,27 @@
 import type { UploadResponse, CompressOptions, CompressResponse, ExtractOptions, ExtractResponse, FilesResponse, FileItem } from '@/types';
 
-const API_BASE = '/api';
+let API_BASE = '/api';
+let apiBasePromise: Promise<string> | null = null;
+
+async function getApiBase(): Promise<string> {
+  if (window.electronAPI) {
+    if (!apiBasePromise) {
+      apiBasePromise = (async () => {
+        const port = await window.electronAPI!.getApiPort();
+        return `http://127.0.0.1:${port}/api`;
+      })();
+    }
+    return apiBasePromise;
+  }
+  return API_BASE;
+}
 
 export const uploadFile = async (file: File): Promise<UploadResponse> => {
+  const base = await getApiBase();
   const formData = new FormData();
   formData.append('file', file);
   
-  const response = await fetch(`${API_BASE}/upload`, {
+  const response = await fetch(`${base}/upload`, {
     method: 'POST',
     body: formData,
   });
@@ -24,7 +39,8 @@ export const uploadFiles = async (files: File[]): Promise<UploadResponse[]> => {
 };
 
 export const compressFiles = async (options: CompressOptions): Promise<CompressResponse> => {
-  const response = await fetch(`${API_BASE}/compress`, {
+  const base = await getApiBase();
+  const response = await fetch(`${base}/compress`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -40,7 +56,8 @@ export const compressFiles = async (options: CompressOptions): Promise<CompressR
 };
 
 export const extractFile = async (options: ExtractOptions): Promise<ExtractResponse> => {
-  const response = await fetch(`${API_BASE}/extract`, {
+  const base = await getApiBase();
+  const response = await fetch(`${base}/extract`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -56,7 +73,8 @@ export const extractFile = async (options: ExtractOptions): Promise<ExtractRespo
 };
 
 export const getFiles = async (): Promise<FilesResponse> => {
-  const response = await fetch(`${API_BASE}/files`);
+  const base = await getApiBase();
+  const response = await fetch(`${base}/files`);
   
   if (!response.ok) {
     throw new Error('获取文件列表失败');
@@ -66,7 +84,8 @@ export const getFiles = async (): Promise<FilesResponse> => {
 };
 
 export const deleteFile = async (filename: string): Promise<{ success: boolean }> => {
-  const response = await fetch(`${API_BASE}/files/${encodeURIComponent(filename)}`, {
+  const base = await getApiBase();
+  const response = await fetch(`${base}/files/${encodeURIComponent(filename)}`, {
     method: 'DELETE',
   });
   
@@ -78,7 +97,8 @@ export const deleteFile = async (filename: string): Promise<{ success: boolean }
 };
 
 export const downloadFile = async (filename: string): Promise<void> => {
-  const response = await fetch(`${API_BASE}/download/${encodeURIComponent(filename)}`);
+  const base = await getApiBase();
+  const response = await fetch(`${base}/download/${encodeURIComponent(filename)}`);
   
   if (!response.ok) {
     throw new Error('下载失败');

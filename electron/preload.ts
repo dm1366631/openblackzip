@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   selectFolder: () => ipcRenderer.invoke('select-folder'),
   saveFile: (defaultName: string) => ipcRenderer.invoke('save-file', defaultName),
   getAppPath: () => ipcRenderer.invoke('get-app-path'),
+  getApiPort: () => ipcRenderer.invoke('get-api-port'),
   openExternal: (url: string) => ipcRenderer.invoke('open-external', url),
   onFilesSelected: (callback: (paths: string[]) => void) => {
     ipcRenderer.on('files-selected', (_event, paths) => callback(paths));

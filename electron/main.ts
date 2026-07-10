@@ -5,10 +5,28 @@ import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
 import fs from 'fs';
+import net from 'net';
 import { spawn } from 'child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+let apiPort = 3001;
+
+function findAvailablePort(startPort: number): Promise<number> {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.once('error', () => {
+      resolve(findAvailablePort(startPort + 1));
+    });
+    server.once('listening', () => {
+      const port = (server.address() as any).port;
+      server.close();
+      resolve(port);
+    });
+    server.listen(startPort, '127.0.0.1');
+  });
+}
 
 // 7zip 可执行文件路径
 function get7zipPath(): string {
@@ -461,11 +479,18 @@ ipcMain.handle('open-external', (event, url) => {
   shell.openExternal(url);
 });
 
-app.whenReady().then(() => {
+ipcMain.handle('get-api-port', () => {
+  return apiPort;
+});
+
+app.whenReady().then(async () => {
+  // 查找可用端口
+  apiPort = await findAvailablePort(3001);
+  
   // 启动 Express 服务器
   server = createServer();
-  serverInstance = server.listen(3001, () => {
-    console.log('API server running on port 3001');
+  serverInstance = server.listen(apiPort, '127.0.0.1', () => {
+    console.log('API server running on port', apiPort);
   });
   
   createWindow();
