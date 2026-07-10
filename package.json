@@ -1,8 +1,18 @@
 {
-  "name": "workspace",
+  "name": "openblackzip",
+  "productName": "OpenBlackZip",
+  "description": "Modern 7zip-based compression tool with beautiful dark theme UI",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
+  "author": "dm1366631",
+  "license": "MIT",
+  "homepage": "https://github.com/dm1366631/openblackzip",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dm1366631/openblackzip.git"
+  },
+  "main": "dist-electron/main.js",
   "scripts": {
     "client:dev": "vite",
     "build": "tsc -b && vite build",
@@ -10,7 +20,42 @@
     "preview": "vite preview",
     "check": "tsc --noEmit",
     "server:dev": "nodemon",
-    "dev": "concurrently \"npm run client:dev\" \"npm run server:dev\""
+    "dev": "concurrently \"npm run client:dev\" \"npm run server:dev\"",
+    "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "electron:build": "vite build && electron-builder",
+    "electron:compile": "tsc -p tsconfig.electron.json",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "build": {
+    "appId": "com.openblackzip.app",
+    "productName": "OpenBlackZip",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "node_modules/**/*",
+      "public/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "node_modules/7zip-bin",
+        "to": "7zip-bin"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "linux": {
+      "target": ["AppImage"]
+    }
   },
   "dependencies": {
     "7zip-bin": "^5.2.0",
@@ -40,6 +85,8 @@
     "autoprefixer": "^10.4.21",
     "babel-plugin-react-dev-locator": "^1.0.0",
     "concurrently": "^9.2.0",
+    "electron": "^43.1.0",
+    "electron-builder": "^26.15.3",
     "eslint": "^9.25.0",
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.19",
@@ -51,6 +98,7 @@
     "typescript": "~5.8.3",
     "typescript-eslint": "^8.30.1",
     "vite": "^6.3.5",
-    "vite-tsconfig-paths": "^5.1.4"
+    "vite-tsconfig-paths": "^5.1.4",
+    "wait-on": "^9.0.10"
   }
 }
