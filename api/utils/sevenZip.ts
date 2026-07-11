@@ -53,11 +53,18 @@ export const compress = async (options: CompressOptions): Promise<string> => {
       cwd: path.join(__dirname, '../../'),
     });
     
+    process.stdout.on('data', () => {});
+    
+    let stderr = '';
+    process.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+    
     process.on('close', (code) => {
       if (code === 0) {
         resolve(options.outputPath);
       } else {
-        reject(new Error(`Compression failed with code ${code}`));
+        reject(new Error(`Compression failed with code ${code}: ${stderr}`));
       }
     });
     
@@ -97,11 +104,16 @@ export const extract = async (options: ExtractOptions): Promise<string[]> => {
       });
     });
     
+    let stderr = '';
+    process.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+    
     process.on('close', (code) => {
       if (code === 0) {
         resolve(extractedFiles);
       } else {
-        reject(new Error(`Extraction failed with code ${code}`));
+        reject(new Error(`Extraction failed with code ${code}: ${stderr}`));
       }
     });
     

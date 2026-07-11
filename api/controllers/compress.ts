@@ -1,13 +1,8 @@
 import { type Request, type Response } from 'express';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import fs from 'fs';
 import { compress as sevenZipCompress } from '../utils/sevenZip';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const uploadsDir = path.join(__dirname, '../../uploads');
+import { getUploadsDir, getOutputDir, validateFilePath } from '../utils/paths';
 
 export const compressFiles = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -29,19 +24,30 @@ export const compressFiles = async (req: Request, res: Response): Promise<void> 
       return;
     }
     
-    const filePaths = files.map(filename => path.join(uploadsDir, filename));
+    const uploadsDir = getUploadsDir();
+    const filePaths: string[] = [];
     
-    const invalidFiles = filePaths.filter(filePath => !fs.existsSync(filePath));
-    if (invalidFiles.length > 0) {
-      res.status(400).json({
-        success: false,
-        error: 'Some files do not exist',
-      });
-      return;
+    for (const filename of files) {
+      const validatedPath = validateFilePath(filename, uploadsDir);
+      if (!validatedPath) {
+        res.status(403).json({
+          success: false,
+          error: 'Invalid file path',
+        });
+        return;
+      }
+      if (!fs.existsSync(validatedPath)) {
+        res.status(404).json({
+          success: false,
+          error: 'File not found: ' + filename,
+        });
+        return;
+      }
+      filePaths.push(validatedPath);
     }
     
     const outputFilename = `archive-${Date.now()}.${format}`;
-    const outputPath = path.join(uploadsDir, outputFilename);
+    const outputPath = path.join(getOutputDir(), outputFilename);
     
     await sevenZipCompress({
       files: filePaths,

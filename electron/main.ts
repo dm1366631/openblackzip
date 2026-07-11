@@ -24,6 +24,16 @@ function findAvailablePort(startPort: number): Promise<number> {
   });
 }
 
+function validateFilePath(filename: string, baseDir: string): string | null {
+  const basename = path.basename(filename);
+  const resolvedPath = path.resolve(baseDir, basename);
+  const normalizedBase = path.resolve(baseDir) + path.sep;
+  if (resolvedPath.startsWith(normalizedBase)) {
+    return resolvedPath;
+  }
+  return null;
+}
+
 // 7zip 可执行文件路径
 function get7zipPath(): string {
   const platform = process.platform;
@@ -63,6 +73,8 @@ const SevenZip = {
       const proc = spawn(sevenZipPath, args);
       let stderr = '';
       
+      proc.stdout.on('data', () => {});
+      
       proc.stderr.on('data', (data) => {
         stderr += data.toString();
       });
@@ -92,6 +104,8 @@ const SevenZip = {
     return new Promise((resolve, reject) => {
       const proc = spawn(sevenZipPath, args);
       let stderr = '';
+      
+      proc.stdout.on('data', () => {});
       
       proc.stderr.on('data', (data) => {
         stderr += data.toString();
@@ -132,7 +146,11 @@ if (!fs.existsSync(outputDir)) {
 function createServer(): express.Application {
   const app = express();
   
-  app.use(cors());
+  app.use(cors({
+    origin: ['http://localhost:5173', 'file://'],
+    methods: ['GET', 'POST', 'DELETE'],
+    credentials: false
+  }));
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ extended: true, limit: '50mb' }));
   
@@ -192,11 +210,21 @@ function createServer(): express.Application {
         return res.status(400).json({ success: false, error: 'No files selected' });
       }
       
-      // files 是文件名数组 string[]
-      const filePaths = files.map((f: string) => path.join(uploadsDir, f));
-      const outputPath = path.join(outputDir, outputName || `archive_${Date.now()}.${format}`);
+      const filePaths: string[] = [];
+      for (const f of files) {
+        const validatedPath = validateFilePath(f, uploadsDir);
+        if (!validatedPath) {
+          return res.status(403).json({ success: false, error: 'Invalid file path' });
+        }
+        if (!fs.existsSync(validatedPath)) {
+          return res.status(404).json({ success: false, error: 'File not found: ' + f });
+        }
+        filePaths.push(validatedPath);
+      }
       
-      // 计算原始大小
+      const sanitizedOutputName = outputName ? path.basename(outputName) : `archive_${Date.now()}.${format}`;
+      const outputPath = path.join(outputDir, sanitizedOutputName);
+      
       let originalSize = 0;
       filePaths.forEach((fp: string) => {
         if (fs.existsSync(fp)) {
@@ -232,13 +260,18 @@ function createServer(): express.Application {
         return res.status(400).json({ success: false, error: 'No file selected' });
       }
       
-      const filePath = path.join(uploadsDir, filename);
+      const filePath = validateFilePath(filename, uploadsDir);
+      if (!filePath) {
+        return res.status(403).json({ success: false, error: 'Invalid file path' });
+      }
       
-      // 解压到临时目录
+      if (!fs.existsSync(filePath)) {
+        return res.status(404).json({ success: false, error: 'File not found' });
+      }
+      
       const tempExtractPath = path.join(outputDir, 'extracted_' + Date.now());
       await SevenZip.extract(filePath, tempExtractPath, { password });
       
-      // 将解压出来的文件移动到 uploadsDir，使其在文件列表中可见
       const extractedFileNames: string[] = [];
       if (fs.existsSync(tempExtractPath)) {
         const items = fs.readdirSync(tempExtractPath);
@@ -247,15 +280,12 @@ function createServer(): express.Application {
           const destName = Date.now() + '-' + Math.round(Math.random() * 1E9) + '-' + item;
           const destPath = path.join(uploadsDir, destName);
           
-          // 移动文件或目录
           fs.renameSync(srcPath, destPath);
           extractedFileNames.push(destName);
         }
-        // 清理空的临时目录
         try { fs.rmdirSync(tempExtractPath); } catch (e) { /* ignore */ }
       }
       
-      // 构建文件信息，与 /api/files 格式一致
       const fileList = extractedFileNames.map(name => {
         const fp = path.join(uploadsDir, name);
         const stats = fs.statSync(fp);
@@ -282,7 +312,11 @@ function createServer(): express.Application {
   // 删除文件
   app.delete('/api/files/:filename', (req, res) => {
     try {
-      const filePath = path.join(uploadsDir, req.params.filename);
+      const filePath = validateFilePath(req.params.filename, uploadsDir);
+      if (!filePath) {
+        return res.status(403).json({ success: false, error: 'Invalid file path' });
+      }
+      
       if (fs.existsSync(filePath)) {
         fs.unlinkSync(filePath);
         res.json({ success: true });
@@ -298,10 +332,17 @@ function createServer(): express.Application {
   app.get('/api/download/:filename', (req, res) => {
     try {
       const filename = req.params.filename;
-      let filePath = path.join(uploadsDir, filename);
+      let filePath = validateFilePath(filename, uploadsDir);
+      
+      if (!filePath) {
+        return res.status(403).json({ success: false, error: 'Invalid file path' });
+      }
       
       if (!fs.existsSync(filePath)) {
-        filePath = path.join(outputDir, filename);
+        filePath = validateFilePath(filename, outputDir);
+        if (!filePath) {
+          return res.status(403).json({ success: false, error: 'Invalid file path' });
+        }
       }
       
       if (fs.existsSync(filePath)) {
@@ -494,16 +535,23 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => {
-  if (serverInstance) {
-    serverInstance.close();
-  }
   if (process.platform !== 'darwin') {
+    if (serverInstance) {
+      serverInstance.close();
+    }
     app.quit();
   }
 });
 
-app.on('activate', () => {
+app.on('activate', async () => {
   if (mainWindow === null) {
+    if (!serverInstance) {
+      apiPort = await findAvailablePort(3001);
+      server = createServer();
+      serverInstance = server.listen(apiPort, '127.0.0.1', () => {
+        console.log('API server running on port', apiPort);
+      });
+    }
     createWindow();
   }
 });

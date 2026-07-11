@@ -1,12 +1,7 @@
 import { type Request, type Response } from 'express';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import fs from 'fs';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const uploadsDir = path.join(__dirname, '../../uploads');
+import { getUploadsDir, validateFilePath } from '../utils/paths';
 
 export interface FileItem {
   name: string;
@@ -18,6 +13,8 @@ export interface FileItem {
 
 export const getFiles = async (req: Request, res: Response): Promise<void> => {
   try {
+    const uploadsDir = getUploadsDir();
+    
     if (!fs.existsSync(uploadsDir)) {
       res.status(200).json({
         files: [],
@@ -64,7 +61,16 @@ export const deleteFile = async (req: Request, res: Response): Promise<void> => 
       return;
     }
     
-    const filePath = path.join(uploadsDir, filename);
+    const uploadsDir = getUploadsDir();
+    const filePath = validateFilePath(filename, uploadsDir);
+    
+    if (!filePath) {
+      res.status(403).json({
+        success: false,
+        error: 'Invalid file path',
+      });
+      return;
+    }
     
     if (!fs.existsSync(filePath)) {
       res.status(404).json({
@@ -99,7 +105,16 @@ export const downloadFile = async (req: Request, res: Response): Promise<void> =
       return;
     }
     
-    const filePath = path.join(uploadsDir, filename);
+    const uploadsDir = getUploadsDir();
+    const filePath = validateFilePath(filename, uploadsDir);
+    
+    if (!filePath) {
+      res.status(403).json({
+        success: false,
+        error: 'Invalid file path',
+      });
+      return;
+    }
     
     if (!fs.existsSync(filePath)) {
       res.status(404).json({
