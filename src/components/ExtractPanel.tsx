@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import { Archive, Lock, Unlock } from 'lucide-react';
 import { useStore } from '@/store/store';
-import { extractFile, getFiles } from '@/utils/api';
+import { extractFile } from '@/utils/api';
 import { createFileItemFromResponse } from '@/utils/api';
 
 export default function ExtractPanel() {
   const [password, setPassword] = useState('');
   
-  const { selectedFiles, files, setProgress, setError, refreshFiles, clearSelectedFiles } = useStore();
+  const { selectedFiles, files, setProgress, setError, addFiles, clearSelectedFiles } = useStore();
   
   const selectedArchive = files.find(f => 
     selectedFiles.includes(f.name) && 
@@ -28,7 +28,7 @@ export default function ExtractPanel() {
     });
     
     try {
-      await extractFile({
+      const result = await extractFile({
         filename: selectedArchive.name,
         password: password || undefined,
       });
@@ -40,30 +40,36 @@ export default function ExtractPanel() {
         type: 'extract',
       });
       
-      setTimeout(async () => {
-        const result = await getFiles();
-        const fileItems = result.files.map(createFileItemFromResponse);
-        refreshFiles(fileItems);
-        
+      // 用解压响应中的文件列表直接添加到前端列表
+      if (result.files && result.files.length > 0) {
+        const fileItems = result.files.map((f: any) => createFileItemFromResponse({
+          name: f.name,
+          size: f.size,
+          type: 'file',
+          extension: f.extension || '',
+          createdAt: new Date(f.createdAt),
+        }));
+        addFiles(fileItems);
+      }
+      
+      setProgress({
+        isActive: true,
+        progress: 100,
+        message: '解压完成',
+        type: 'extract',
+      });
+      
+      clearSelectedFiles();
+      setPassword('');
+      
+      setTimeout(() => {
         setProgress({
-          isActive: true,
-          progress: 100,
-          message: '解压完成',
+          isActive: false,
+          progress: 0,
+          message: '',
           type: 'extract',
         });
-        
-        clearSelectedFiles();
-        setPassword('');
-        
-        setTimeout(() => {
-          setProgress({
-            isActive: false,
-            progress: 0,
-            message: '',
-            type: 'extract',
-          });
-        }, 1500);
-      }, 1000);
+      }, 1500);
       
       setError(null);
     } catch (err) {

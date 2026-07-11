@@ -36,7 +36,13 @@ export interface ExtractOptions {
 
 export interface ExtractResponse {
   success: boolean;
-  files: string[];
+  files: Array<{
+    name: string;
+    size: number;
+    type: string;
+    extension: string;
+    createdAt: string;
+  }>;
 }
 
 export interface FilesResponse {

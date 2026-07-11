@@ -223,7 +223,7 @@ function createServer(): express.Application {
     }
   });
   
-  // 解压文件 - 接收 {filename, password}，返回 {success, files: string[]}
+  // 解压文件 - 接收 {filename, password}，返回 {success, files: FileItem[]}
   app.post('/api/extract', async (req, res) => {
     try {
       const { filename, password } = req.body;
@@ -233,14 +233,46 @@ function createServer(): express.Application {
       }
       
       const filePath = path.join(uploadsDir, filename);
-      const extractPath = path.join(outputDir, 'extracted_' + Date.now());
       
-      await SevenZip.extract(filePath, extractPath, { password });
+      // 解压到临时目录
+      const tempExtractPath = path.join(outputDir, 'extracted_' + Date.now());
+      await SevenZip.extract(filePath, tempExtractPath, { password });
       
-      const extractedFiles = fs.existsSync(extractPath) ? fs.readdirSync(extractPath) : [];
+      // 将解压出来的文件移动到 uploadsDir，使其在文件列表中可见
+      const extractedFileNames: string[] = [];
+      if (fs.existsSync(tempExtractPath)) {
+        const items = fs.readdirSync(tempExtractPath);
+        for (const item of items) {
+          const srcPath = path.join(tempExtractPath, item);
+          const destName = Date.now() + '-' + Math.round(Math.random() * 1E9) + '-' + item;
+          const destPath = path.join(uploadsDir, destName);
+          
+          // 移动文件或目录
+          fs.renameSync(srcPath, destPath);
+          extractedFileNames.push(destName);
+        }
+        // 清理空的临时目录
+        try { fs.rmdirSync(tempExtractPath); } catch (e) { /* ignore */ }
+      }
+      
+      // 构建文件信息，与 /api/files 格式一致
+      const fileList = extractedFileNames.map(name => {
+        const fp = path.join(uploadsDir, name);
+        const stats = fs.statSync(fp);
+        const originalName = name.split('-').slice(2).join('-') || name;
+        const ext = path.extname(originalName).toLowerCase().slice(1);
+        return {
+          name: name,
+          size: stats.size,
+          type: 'file' as const,
+          extension: ext,
+          createdAt: stats.birthtime.toISOString(),
+        };
+      });
+      
       res.json({
         success: true,
-        files: extractedFiles
+        files: fileList
       });
     } catch (error: any) {
       res.status(500).json({ success: false, error: error.message });
