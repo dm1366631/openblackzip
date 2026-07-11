@@ -24,7 +24,7 @@ export default function UploadZone() {
         name: res.filename,
         size: res.size,
         type: 'file',
-        extension: res.filename.split('.').pop()?.toLowerCase() || '',
+        extension: res.filename.split('-').slice(2).join('-').split('.').pop()?.toLowerCase() || '',
         createdAt: new Date(),
       }));
       

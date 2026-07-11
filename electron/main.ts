@@ -1,15 +1,11 @@
 import { app, BrowserWindow, ipcMain, dialog, Menu, shell } from 'electron';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
 import fs from 'fs';
 import net from 'net';
 import { spawn } from 'child_process';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 let apiPort = 3001;
 
@@ -150,25 +146,21 @@ function createServer(): express.Application {
   });
   const upload = multer({ storage });
   
-  // 上传文件
+  // 上传文件 - 返回前端期望的 {success, filename, size, path}
   app.post('/api/upload', upload.single('file'), (req, res) => {
     if (!req.file) {
       return res.status(400).json({ success: false, error: 'No file uploaded' });
     }
     
-    const fileInfo = {
-      name: req.file.filename,
-      originalName: req.file.originalname,
+    res.json({
+      success: true,
+      filename: req.file.filename,
       size: req.file.size,
-      type: req.file.mimetype,
-      path: req.file.path,
-      extension: path.extname(req.file.originalname).toLowerCase().slice(1)
-    };
-    
-    res.json({ success: true, data: fileInfo });
+      path: req.file.path
+    });
   });
   
-  // 获取文件列表
+  // 获取文件列表 - 返回前端期望的 {files: [...]}
   app.get('/api/files', (req, res) => {
     try {
       const files = fs.readdirSync(uploadsDir);
@@ -176,24 +168,22 @@ function createServer(): express.Application {
         const filePath = path.join(uploadsDir, filename);
         const stats = fs.statSync(filePath);
         const originalName = filename.split('-').slice(2).join('-') || filename;
+        const ext = path.extname(originalName).toLowerCase().slice(1);
         return {
           name: filename,
-          originalName: originalName,
           size: stats.size,
-          type: getFileType(path.extname(originalName).toLowerCase().slice(1)),
-          path: filePath,
-          extension: path.extname(originalName).toLowerCase().slice(1),
+          type: 'file' as const,
+          extension: ext,
           createdAt: stats.birthtime.toISOString(),
-          modifiedAt: stats.mtime.toISOString()
         };
       });
-      res.json({ success: true, data: fileList });
+      res.json({ files: fileList });
     } catch (error) {
-      res.status(500).json({ success: false, error: 'Failed to get files' });
+      res.status(500).json({ files: [] });
     }
   });
   
-  // 压缩文件
+  // 压缩文件 - 接收 files: string[]，返回 {success, outputPath, outputFilename, originalSize, compressedSize}
   app.post('/api/compress', async (req, res) => {
     try {
       const { files, format, level, password, outputName } = req.body;
@@ -202,8 +192,17 @@ function createServer(): express.Application {
         return res.status(400).json({ success: false, error: 'No files selected' });
       }
       
-      const filePaths = files.map((f: { name: string }) => path.join(uploadsDir, f.name));
-      const outputPath = path.join(outputDir, outputName || `archive.${format}`);
+      // files 是文件名数组 string[]
+      const filePaths = files.map((f: string) => path.join(uploadsDir, f));
+      const outputPath = path.join(outputDir, outputName || `archive_${Date.now()}.${format}`);
+      
+      // 计算原始大小
+      let originalSize = 0;
+      filePaths.forEach((fp: string) => {
+        if (fs.existsSync(fp)) {
+          originalSize += fs.statSync(fp).size;
+        }
+      });
       
       await SevenZip.compress(filePaths, outputPath, {
         format,
@@ -214,37 +213,34 @@ function createServer(): express.Application {
       const stats = fs.statSync(outputPath);
       res.json({
         success: true,
-        data: {
-          name: path.basename(outputPath),
-          path: outputPath,
-          size: stats.size
-        }
+        outputPath: outputPath,
+        outputFilename: path.basename(outputPath),
+        originalSize: originalSize,
+        compressedSize: stats.size
       });
     } catch (error: any) {
       res.status(500).json({ success: false, error: error.message });
     }
   });
   
-  // 解压文件
+  // 解压文件 - 接收 {filename, password}，返回 {success, files: string[]}
   app.post('/api/extract', async (req, res) => {
     try {
-      const { file, password, outputDir: customOutputDir } = req.body;
+      const { filename, password } = req.body;
       
-      if (!file) {
+      if (!filename) {
         return res.status(400).json({ success: false, error: 'No file selected' });
       }
       
-      const filePath = path.join(uploadsDir, file.name);
-      const extractPath = customOutputDir || path.join(outputDir, 'extracted');
+      const filePath = path.join(uploadsDir, filename);
+      const extractPath = path.join(outputDir, 'extracted_' + Date.now());
       
       await SevenZip.extract(filePath, extractPath, { password });
       
+      const extractedFiles = fs.existsSync(extractPath) ? fs.readdirSync(extractPath) : [];
       res.json({
         success: true,
-        data: {
-          path: extractPath,
-          files: fs.readdirSync(extractPath)
-        }
+        files: extractedFiles
       });
     } catch (error: any) {
       res.status(500).json({ success: false, error: error.message });
@@ -266,24 +262,16 @@ function createServer(): express.Application {
     }
   });
   
-  // 下载文件
+  // 下载文件 - 先从 uploads 找，再从 output 找
   app.get('/api/download/:filename', (req, res) => {
     try {
-      const filePath = path.join(uploadsDir, req.params.filename);
-      if (fs.existsSync(filePath)) {
-        res.download(filePath);
-      } else {
-        res.status(404).json({ success: false, error: 'File not found' });
+      const filename = req.params.filename;
+      let filePath = path.join(uploadsDir, filename);
+      
+      if (!fs.existsSync(filePath)) {
+        filePath = path.join(outputDir, filename);
       }
-    } catch (error) {
-      res.status(500).json({ success: false, error: 'Failed to download file' });
-    }
-  });
-  
-  // 下载压缩/解压结果
-  app.get('/api/download-result/:filename', (req, res) => {
-    try {
-      const filePath = path.join(outputDir, req.params.filename);
+      
       if (fs.existsSync(filePath)) {
         res.download(filePath);
       } else {
@@ -297,30 +285,6 @@ function createServer(): express.Application {
   return app;
 }
 
-function getFileType(extension: string): string {
-  const typeMap: Record<string, string> = {
-    'zip': 'archive',
-    '7z': 'archive',
-    'rar': 'archive',
-    'tar': 'archive',
-    'gz': 'archive',
-    'pdf': 'file-pdf',
-    'doc': 'file-text',
-    'docx': 'file-text',
-    'txt': 'file-text',
-    'xls': 'file-spreadsheet',
-    'xlsx': 'file-spreadsheet',
-    'jpg': 'image',
-    'jpeg': 'image',
-    'png': 'image',
-    'gif': 'image',
-    'mp4': 'video',
-    'mp3': 'music',
-    'exe': 'file-exe',
-  };
-  return typeMap[extension] || 'file';
-}
-
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1200,
@@ -332,6 +296,7 @@ function createWindow(): void {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      sandbox: false,
       preload: path.join(__dirname, 'preload.js')
     },
     backgroundColor: '#0a0a0f',

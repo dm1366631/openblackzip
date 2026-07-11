@@ -174,7 +174,7 @@ export const getFileIcon = (extension: string): string => {
 export const createFileItemFromResponse = (data: Omit<FileItem, 'selected'>): FileItem => {
   return {
     ...data,
-    createdAt: new Date(data.createdAt),
+    createdAt: data.createdAt instanceof Date ? data.createdAt : new Date(data.createdAt),
     selected: false,
   };
 };
